@@ -64,7 +64,8 @@ func (n *Neuron) Backwards() {
 	defer n.mu.Unlock()
 
 	var (
-		nyhat, nyhatSum float64 // this neuron's pred
+		//nyhat float64
+		//nyhatSum float64 // this neuron's pred
 		lossSum float64
 		zSum float64
 	)
@@ -83,15 +84,15 @@ func (n *Neuron) Backwards() {
 		// v[1] = z  (pre-activation)
 		// v[2] = a  (post-activation)
 		zSum += v[1]
-		nyhatSum += v[2]
+		//nyhatSum += v[2]
 	}
 	// clear the forward cache
 	n.cache.ZeroForward()
 	// get this neuron's average pred
 	//nyhat = nyhatSum / float64(len(cached))
-	nyhat = zSum / float64(len(cached))
-	theta := nyhat * n.Conf.Activator.Backward(nyhat)  // activator derivative
-	wLoss := loss * (theta / (theta + n.bias))  // the weight's portion of the loss
+	//nyhat = zSum / float64(len(cached))
+	//theta := nyhat * n.Conf.Activator.Backward(nyhat)  // activator derivative
+	wLoss := loss * (zSum / (zSum + n.bias))  // the weight's portion of the loss
 	bLoss := loss - wLoss  // the bias' portion of the loss
 	// update the weight and bias
 	n.weight -= wLoss * math.Abs(wLoss) * n.Conf.LearningRate

@@ -12,7 +12,7 @@ func simpleQuadratic(x float64) float64 {
 
 func TestNeuron(t *testing.T) {
 	conf := &Config{
-		LearningRate: 0.001,
+		LearningRate: 0.003,
 		Precision:    0.0001,
 		Activator:    &LeakyRelu{},
 		PreProcessor: &SumProcessor{},
