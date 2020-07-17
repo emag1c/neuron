@@ -1,4 +1,4 @@
-package neurons
+package neuron
 
 
 type PreProcessor interface {
