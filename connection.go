@@ -1,9 +1,5 @@
 package neuron
 
-import (
-	"math/rand"
-)
-
 type Packet struct {
 	NeuronID *NeuronID
 	Data     []float64
@@ -16,10 +12,7 @@ type Connection struct {
 	Backward        chan *Packet
 }
 
-func NewConnection(provider, consumer *NeuronID, weight float64) *Connection {
-	if weight == 0 {
-		weight = rand.Float64()
-	}
+func NewConnection(provider, consumer *NeuronID) *Connection {
 	return &Connection{
 		ProvidingNeuron: provider,
 		ConsumingNeuron: consumer,

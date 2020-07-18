@@ -193,7 +193,7 @@ func NewNeuron(conf *Config, id NeuronID, weight, bias float64, ctx context.Cont
 func ConnectNeurons(providers []*Neuron, consumers []*Neuron) error {
 	for _, provider := range providers {
 		for _, consumer := range consumers {
-			conn := NewConnection(provider.ID(), consumer.ID(), 0)
+			conn := NewConnection(provider.ID(), consumer.ID())
 			if err := provider.AddOutputConnections([]*Connection{conn}); err != nil {
 				return err
 			}

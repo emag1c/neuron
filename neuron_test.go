@@ -25,7 +25,7 @@ func TestNeuron(t *testing.T) {
 	}
 
 	// add the input connection
-	inputConn := NewConnection(nil, inputLayer[0].ID(), rand.Float64())
+	inputConn := NewConnection(nil, inputLayer[0].ID())
 	err := inputLayer[0].AddInputConnections([]*Connection{inputConn})
 	if err != nil {
 		panic(err)
@@ -70,7 +70,7 @@ func TestNeuron(t *testing.T) {
 	}
 
 	// add the output connection
-	outputConn := NewConnection(outputLayer[0].ID(), nil, rand.Float64())
+	outputConn := NewConnection(outputLayer[0].ID(), nil)
 	err = outputLayer[0].AddOutputConnections([]*Connection{outputConn})
 	if err != nil {
 		panic(err)
@@ -139,7 +139,7 @@ func TestNeuron(t *testing.T) {
 }
 
 func simpleMultiInputQuadratic(x, y float64) float64 {
-	return ((x*2+y*5+5)*2+6*10+9)*3 + 5
+	return ((x*5+5)*y*2+6*10+9)*3 + 5
 }
 
 func TestMultiInputNeuron(t *testing.T) {
@@ -159,8 +159,8 @@ func TestMultiInputNeuron(t *testing.T) {
 
 	// add the input connection
 	inputConns := []*Connection{
-		NewConnection(nil, inputLayer[0].ID(), rand.Float64()),
-		NewConnection(nil, inputLayer[1].ID(), rand.Float64()),
+		NewConnection(nil, inputLayer[0].ID()),
+		NewConnection(nil, inputLayer[1].ID()),
 	}
 
 	err := inputLayer[0].AddInputConnections(inputConns)
@@ -207,7 +207,7 @@ func TestMultiInputNeuron(t *testing.T) {
 	}
 
 	// add the output connection
-	outputConn := NewConnection(outputLayer[0].ID(), nil, rand.Float64())
+	outputConn := NewConnection(outputLayer[0].ID(), nil)
 	err = outputLayer[0].AddOutputConnections([]*Connection{outputConn})
 	if err != nil {
 		panic(err)
