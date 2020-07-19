@@ -1,14 +1,13 @@
 package neuron
 
 import (
-	"context"
 	"fmt"
 	"math"
+	"math/rand"
 	"sync"
 )
 
 type NeuronID uint64
-
 
 type Neuron struct {
 	Conf    *Config
@@ -18,7 +17,7 @@ type Neuron struct {
 	cache   *NeuronCache
 	weight  float64
 	bias    float64
-	ctx     context.Context
+	session *Session
 	mu      sync.Mutex
 	pre     PreProcessor
 	alive   bool
@@ -32,81 +31,96 @@ func (n *Neuron) Forward() {
 	//inputsExpected := len(n.Inputs)
 	packets := map[*NeuronID]*Packet{}
 
+	var (
+		x  float64
+		xs []float64
+	)
+
 	for _, conn := range n.Inputs {
-		rcv := <-conn.Forward
-		packets[rcv.NeuronID] = rcv
+		packet := <-conn.Forward
+		packets[packet.NeuronID] = packet
 	}
-	// do all required calculations over received packets
-	x := n.Conf.PreProcessor.PreForward(packets)
-	z := x * n.weight + n.bias
-	a := n.Conf.Activator.Forward(z)
-	// todo: implement hook here
-	n.cache.AddForward(x, z, a)
+
+	if n.session.Predicting() { // we are predicting
+		xs = make([]float64, len(packets))
+		i := 0
+		for _, p := range packets {
+			xs[i] = p.X
+			i++
+		}
+		x = n.Conf.PreProcessor.PreProcess(xs)
+		z := x*n.weight + n.bias
+		a := n.Conf.Activator.Forward(z)
+		n.cache.Add(x, z, a)
+		x = a
+		//fmt.Printf(">+< %v x = %.3f, z = %.3f\n", n.ID(), x, z)
+	}
+	if n.session.Training() { // we are updating weights and biases
+		// update weights and bias if we were passed a loss value
+		n.UpdateWeightAndBias()
+	}
 	// send packet up the chain to all connected neurons
 	for _, conn := range n.Outputs {
 		conn.Forward <- &Packet{
 			NeuronID: &n.id,
-			Data: []float64{a},
+			X:        x,
 		}
 	}
 }
 
-func (n *Neuron) Backwards() {
-
-	packets := map[*NeuronID]*Packet{}
-
-	for _, conn := range n.Outputs {
-		rcv := <-conn.Backward
-		packets[rcv.NeuronID] = rcv
-	}
-
+func (n *Neuron) UpdateWeightAndBias() {
 	n.mu.Lock()
 	defer n.mu.Unlock()
-
-	var (
-		//nyhat float64
-		//nyhatSum float64 // this neuron's pred
-		lossSum float64
-		zSum float64
-	)
-	// loop over packets to get sums
-	for _, p := range packets {
-		// p.Data[0] = yhat
-		// p.Data[1] = y
-		lossSum += p.Data[0]
+	defer n.cache.Zero()
+	// get random factors for weight and bias updates
+	wRandFactor := float64(1)
+	bRandFactor := float64(1)
+	if n.Conf.RandomFactor > 0 {
+		wRandFactor += n.Conf.RandomFactor * rand.NormFloat64()
+		bRandFactor += n.Conf.RandomFactor * rand.NormFloat64()
 	}
-	loss := lossSum / float64(len(packets))
-	// get cached forward values
-	cached := n.cache.GetForward()
-	// loop over cached values
-	for _, v := range cached {
-		// v[0] = xSum  (sum of inputs before applying weight and bias)
-		// v[1] = z  (pre-activation)
-		// v[2] = a  (post-activation)
-		zSum += v[1]
-		//nyhatSum += v[2]
+	// get cached values values
+	cached := n.cache.Get()
+	var zSum, z float64
+	for _, c := range cached {
+		zSum += c[1]
 	}
-	// clear the forward cache
-	n.cache.ZeroForward()
-	// get this neuron's average pred
-	//nyhat = nyhatSum / float64(len(cached))
-	//nyhat = zSum / float64(len(cached))
-	//theta := nyhat * n.Conf.Activator.Backward(nyhat)  // activator derivative
-	wLoss := loss * (zSum / (zSum + n.bias))  // the weight's portion of the loss
-	bLoss := loss - wLoss  // the bias' portion of the loss
+	// average the a and z values from this neuron's memory
+	z = zSum / float64(len(cached))
+	d := float64(1)
+	if z == 0 {
+		// prevent 0 values
+		z = 1e-10
+	}
+	loss := n.session.Loss()
+	wLoss := loss * (z / (z + n.bias)) // the weight's portion of the loss
+	bLoss := loss - wLoss              // the bias' portion of the loss
 	// update the weight and bias
-	n.weight -= wLoss * math.Abs(wLoss) * n.Conf.LearningRate
-	n.bias -= bLoss * math.Abs(bLoss) * n.Conf.LearningRate
-	//fmt.Printf(">+< %v theta: %.03f loss: %.03f wLoss: %.03f weight: %.03f bias: %.03f\n", &n,
-	//	theta, loss, wLoss, n.weight, n.bias)
+	wNew := (d*wLoss*math.Abs(wLoss) * n.session.LearningRate() + n.weight) * wRandFactor
+	bNew := (d*bLoss*math.Abs(bLoss) * n.session.LearningRate() + n.bias) * bRandFactor
 
-
-	// get each input's value based on ratio
-	for _, conn := range n.Inputs {
-		conn.Backward <- &Packet{
-			NeuronID: &n.id,
-			Data:     []float64{loss},  // Data[0] = yhat, p.Data[1] = y
+	if n.Conf.MaxWeight != 0 {
+		if wNew > n.Conf.MaxWeight {
+			wNew = n.Conf.MaxWeight
+		} else if wNew < -n.Conf.MaxWeight {
+			wNew = -n.Conf.MaxWeight
 		}
+	}
+	if n.Conf.MaxBias != 0 {
+		if bNew > n.Conf.MaxBias {
+			bNew = n.Conf.MaxBias
+		} else if bNew < -n.Conf.MaxBias {
+			bNew = -n.Conf.MaxBias
+		}
+	}
+	//fmt.Printf("wOld: %.3f bOld: %.3f wRand: %.3f bRand: %.3f\n", n.weight, n.bias, wRandFactor, bRandFactor)
+	//fmt.Printf("loss: %.3f wNew: %.3f bNew: %.3f wLoss: %.3f bLoss: %.3f\n", loss, wNew, bNew, wLoss, bLoss)
+
+	if math.Abs(wNew-n.weight) > n.Conf.Precision {
+		n.weight = wNew
+	}
+	if math.Abs(bNew-n.bias) > n.Conf.Precision {
+		n.bias = bNew
 	}
 }
 
@@ -130,11 +144,11 @@ func (n *Neuron) AddOutputConnections(conn []*Connection) error {
 	return nil
 }
 
-func (n *Neuron) ForwardLoop() {
+func (n *Neuron) MainLoop() {
 	for {
 		// keep looping until context is done
 		select {
-		case <-n.ctx.Done(): // stop on context cancel
+		case <-n.session.ctx.Done(): // stop on context cancel
 			n.mu.Lock()
 			n.alive = false
 			n.mu.Unlock()
@@ -145,50 +159,32 @@ func (n *Neuron) ForwardLoop() {
 	}
 }
 
-func (n *Neuron) BackwardLoop() {
-	for {
-		// keep looping until context is done
-		select {
-		case <-n.ctx.Done(): // stop on context cancel
-			n.mu.Lock()
-			n.alive = false
-			n.mu.Unlock()
-			return
-		default: // keep running
-		}
-		n.Backwards()
-	}
-}
-
 func (n *Neuron) On() {
 	n.mu.Lock()
 	n.alive = true
 	n.mu.Unlock()
-	// start the forward and backwards loops in their own routines
-	// this allows backward backwards propagation and forward propagation to occur at the same time
-	go n.ForwardLoop()
-	go n.BackwardLoop()
+	// start the values and backwards loops in their own routines
+	// this allows backward backwards propagation and values propagation to occur at the same time
+	go n.MainLoop()
 }
 
-func NewNeuron(conf *Config, id NeuronID, weight, bias float64, ctx context.Context) *Neuron {
+func NewNeuron(conf *Config, id NeuronID, weight, bias float64, sess *Session) *Neuron {
 	return &Neuron{
 		Conf:    conf,
 		id:      id,
 		Inputs:  []*Connection{},
 		Outputs: []*Connection{},
-		cache:       &NeuronCache{
-			forward:  [][]float64{},
-			backward: [][]float64{},
-			mu:       sync.RWMutex{},
+		cache: &NeuronCache{
+			values: [][]float64{},
+			mu:     sync.RWMutex{},
 		},
-		bias:        bias,
-		weight:      weight,
-		ctx:         ctx,
-		mu:          sync.Mutex{},
-		alive:       false,
+		bias:    bias,
+		weight:  weight,
+		session: sess,
+		mu:      sync.Mutex{},
+		alive:   false,
 	}
 }
-
 
 func ConnectNeurons(providers []*Neuron, consumers []*Neuron) error {
 	for _, provider := range providers {
